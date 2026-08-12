@@ -268,7 +268,7 @@ footer em{font-family:var(--serif);font-size:.9rem;color:#cbc8c0}
 
     <div class="editor" id="editorBox">
       <div class="admin-title">Escribir artículo</div>
-      <div class="admin-status ok" id="sessionStatus"></div>
+      <div class="admin-status ok" id="sessionStatus"></div><div class="admin-status" style="font-size:.62rem">Editor v5 · sesión estable</div>
 
       <div class="editor-grid">
         <div>
@@ -371,6 +371,7 @@ const CATS={
 let entries=[];
 let currentCat='todo';
 let user=null;
+let session=null;
 let editingId=null;
 let coverFile=null;
 let inlineFile=null;
@@ -523,10 +524,18 @@ document.querySelectorAll('#catNav button').forEach(b=>b.addEventListener('click
 }));
 
 async function initAdmin(){
-  const {data}=await db.auth.getUser();
-  user=data?.user||null;
+  const {data,error}=await db.auth.getSession();
+  if(error){
+    session=null;
+    user=null;
+  }else{
+    session=data?.session||null;
+    user=session?.user||null;
+  }
+
   $('#loginBox').classList.toggle('hidden',!!user);
   $('#editorBox').classList.toggle('show',!!user);
+
   if(user){
     $('#sessionStatus').textContent=`Sesión activa · ${user.email}`;
     renderAdminList();
@@ -535,16 +544,35 @@ async function initAdmin(){
 
 $('#loginBtn').addEventListener('click',async()=>{
   const status=$('#loginStatus');
+  status.className='admin-status';
   status.textContent='Entrando…';
-  const {data,error}=await db.auth.signInWithPassword({email:$('#email').value.trim(),password:$('#password').value});
-  if(error||!data?.user){status.className='admin-status err';status.textContent='No se pudo iniciar sesión: '+(error?.message||'error');return}
-  user=data.user;status.textContent='';
-  $('#loginBox').classList.add('hidden');$('#editorBox').classList.add('show');
+
+  const {data,error}=await db.auth.signInWithPassword({
+    email:$('#email').value.trim(),
+    password:$('#password').value
+  });
+
+  if(error || !data?.session || !data?.user){
+    session=null;
+    user=null;
+    status.className='admin-status err';
+    status.textContent='No se pudo iniciar sesión: '+(error?.message||'Supabase no devolvió una sesión.');
+    return;
+  }
+
+  session=data.session;
+  user=data.user;
+  status.textContent='';
+
+  $('#loginBox').classList.add('hidden');
+  $('#editorBox').classList.add('show');
   $('#sessionStatus').textContent=`Sesión activa · ${user.email}`;
-  await fetchEntries();renderAdminList();
+
+  await fetchEntries();
+  renderAdminList();
 });
 $('#password').addEventListener('keydown',e=>{if(e.key==='Enter')$('#loginBtn').click()});
-$('#logoutBtn').addEventListener('click',async()=>{await db.auth.signOut();user=null;setQuery({admin:'1'})});
+$('#logoutBtn').addEventListener('click',async()=>{await db.auth.signOut();session=null;user=null;setQuery({admin:'1'})});
 
 function showCover(file){
   coverFile=file||null;
@@ -566,13 +594,26 @@ $('#inlineInput').addEventListener('change',e=>{
 
 async function uploadFile(file,folder='articles'){
   if(!file)return null;
-  const {data:u}=await db.auth.getUser();
-  if(!u?.user)throw new Error('Tu sesión no está activa.');
+
+  if(!user || !session){
+    throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
+  }
+
   if(file.size>5*1024*1024)throw new Error('La imagen supera 5 MB.');
+
   const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'-');
-  const path=`${u.user.id}/${folder}/${crypto.randomUUID()}-${safe}`;
-  const {error}=await db.storage.from('pensadero').upload(path,file,{contentType:file.type,upsert:false,cacheControl:'3600'});
+  const path=`${user.id}/${folder}/${crypto.randomUUID()}-${safe}`;
+
+  const {error}=await db.storage
+    .from('pensadero')
+    .upload(path,file,{
+      contentType:file.type,
+      upsert:false,
+      cacheControl:'3600'
+    });
+
   if(error)throw new Error('FOTO · '+error.message);
+
   const {data}=db.storage.from('pensadero').getPublicUrl(path);
   return {url:data.publicUrl,path};
 }
@@ -617,11 +658,11 @@ async function saveArticle(published){
     const payload={text:title,subtitle,body,type,published,image_url:imageUrl||'',image_path:imagePath||'',updated_at:new Date().toISOString()};
     let error;
     if(editingId){
+      if(!user || !session)throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
       ({error}=await db.from('entries').update(payload).eq('id',editingId));
     }else{
-      const {data:u}=await db.auth.getUser();
-      if(!u?.user)throw new Error('Tu sesión no está activa.');
-      ({error}=await db.from('entries').insert({...payload,owner_id:u.user.id,done:false}));
+      if(!user || !session)throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
+      ({error}=await db.from('entries').insert({...payload,owner_id:user.id,done:false}));
     }
     if(error)throw new Error('DATOS · '+error.message);
     status.className='admin-status ok';status.textContent=published?'Publicado ✓':'Borrador guardado ✓';
@@ -663,6 +704,19 @@ function renderAdminList(){
   document.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',()=>editArticle(b.dataset.edit)));
   document.querySelectorAll('[data-delete]').forEach(b=>b.addEventListener('click',()=>deleteArticle(b.dataset.delete)));
 }
+
+db.auth.onAuthStateChange((event,newSession)=>{
+  session=newSession||null;
+  user=newSession?.user||null;
+
+  if(new URLSearchParams(location.search).get('admin')==='1'){
+    $('#loginBox').classList.toggle('hidden',!!user);
+    $('#editorBox').classList.toggle('show',!!user);
+    if(user){
+      $('#sessionStatus').textContent=`Sesión activa · ${user.email}`;
+    }
+  }
+});
 
 route();
 </script>
