@@ -34,6 +34,14 @@ button,input{font:inherit}
 .btn:hover{background:var(--accent);border-color:var(--accent);color:#fff}
 .admin-title{font-size:.68rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase;margin-bottom:12px}
 .admin-msg{margin-top:10px;font-size:.76rem;color:var(--muted)}
+.photo-feedback{display:none;align-items:center;gap:12px;margin-top:12px;padding:10px 12px;border:1px solid var(--line);max-width:520px}
+.photo-feedback.show{display:flex}
+.photo-preview{width:54px;height:54px;object-fit:cover;border:1px solid var(--line);background:#f4f3ef}
+.photo-meta{font-size:.75rem;color:var(--muted);line-height:1.35}
+.photo-meta strong{display:block;color:var(--ink);font-size:.78rem}
+.stage-ok{color:#237a47}
+.stage-error{color:#b3261e}
+.editor-version{font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-left:8px}
 .types{display:flex;gap:7px;flex-wrap:wrap}
 .type{font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:7px 12px;border:1px solid var(--faint);border-radius:999px;background:#fff;cursor:pointer}
 .type.active{background:var(--ink);border-color:var(--ink);color:#fff}
@@ -104,11 +112,15 @@ footer{background:var(--ink);color:#fff}
           <button class="type" data-type="pelicula">Película</button>
         </div>
         <input type="text" id="composerInput" placeholder="Escribe el título o la idea…">
-        <label class="filelabel">Añadir foto<input type="file" id="composerImage" accept="image/jpeg,image/png,image/webp,image/gif"></label>
+        <label class="filelabel"><span id="photoLabel">Añadir foto</span><input type="file" id="composerImage" accept="image/jpeg,image/png,image/webp,image/gif"></label>
         <button class="btn" id="composerAdd">Guardar</button>
         <button class="btn light" id="logoutBtn">Salir</button>
       </div>
-      <div class="admin-msg" id="editorMsg">Lo que guardes aquí se publica directamente.</div>
+      <div class="photo-feedback" id="photoFeedback">
+        <img class="photo-preview" id="photoPreview" alt="Vista previa de la foto">
+        <div class="photo-meta"><strong id="photoName">Foto seleccionada</strong><span id="photoSize"></span></div>
+      </div>
+      <div class="admin-msg" id="editorMsg">Lo que guardes aquí se publica directamente.<span class="editor-version">editor v4</span></div>
     </div>
   </section>
 
@@ -149,8 +161,8 @@ const SUPABASE_KEY = 'sb_publishable_DQU4BAcaVhf1FRl37bGZ8w_wkLP8U2j';
 const configured = !SUPABASE_URL.startsWith('PEGA_') && !SUPABASE_KEY.startsWith('PEGA_');
 const db = configured ? createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth:{
-    persistSession:false,
-    autoRefreshToken:false,
+    persistSession:true,
+    autoRefreshToken:true,
     detectSessionInUrl:false
   }
 }) : null;
@@ -261,126 +273,78 @@ function render(){
   });
 }
 
-async function requireSession(){
-  if(!currentSession?.access_token || !currentSession?.user){
+async function verifiedUser(){
+  if(!configured) throw new Error('Supabase no está configurado.');
+
+  // getUser() consulta Auth y verifica el JWT con Supabase.
+  const {data,error}=await db.auth.getUser();
+  if(error || !data?.user){
     throw new Error('Tu sesión no está activa. Pulsa Salir y vuelve a iniciar sesión.');
   }
-
-  // Si el token está a punto de caducar, lo renovamos usando el refresh token
-  // que mantenemos EN MEMORIA durante esta sesión de edición.
-  const now=Math.floor(Date.now()/1000);
-  if(currentSession.expires_at && currentSession.expires_at <= now+60){
-    if(!currentSession.refresh_token){
-      throw new Error('Tu sesión ha caducado. Pulsa Salir y vuelve a iniciar sesión.');
-    }
-
-    const rr=await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,{
-      method:'POST',
-      headers:{
-        'apikey':SUPABASE_KEY,
-        'Content-Type':'application/json'
-      },
-      body:JSON.stringify({refresh_token:currentSession.refresh_token})
-    });
-
-    if(!rr.ok){
-      currentSession=null;
-      currentUser=null;
-      throw new Error('Tu sesión ha caducado. Pulsa Salir y vuelve a iniciar sesión.');
-    }
-
-    const refreshed=await rr.json();
-    currentSession={
-      access_token:refreshed.access_token,
-      refresh_token:refreshed.refresh_token,
-      expires_at:Math.floor(Date.now()/1000)+(refreshed.expires_in||3600),
-      user:refreshed.user||currentUser
-    };
-    currentUser=currentSession.user;
-  }
-
-  return currentSession;
+  currentUser=data.user;
+  return data.user;
 }
 
-async function restWrite(method, path, body){
-  const session=await requireSession();
-  const r=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{
-    method,
-    headers:{
-      'apikey':SUPABASE_KEY,
-      'Authorization':`Bearer ${session.access_token}`,
-      'Content-Type':'application/json',
-      'Prefer':'return=minimal'
-    },
-    body:body===undefined?undefined:JSON.stringify(body)
-  });
-
-  if(!r.ok){
-    let message=`HTTP ${r.status}`;
-    try{
-      const j=await r.json();
-      message=j.message||j.error_description||j.error||message;
-    }catch(e){}
-    throw new Error(message);
-  }
-}
-
-function encodeStoragePath(path){
-  return path.split('/').map(encodeURIComponent).join('/');
-}
-
-async function uploadImage(file){
+async function uploadImage(file,user,msg){
   if(!file) return {url:'',path:''};
 
-  const session=await requireSession();
-  const safe=(file.name||'imagen').replace(/[^a-zA-Z0-9._-]/g,'-');
-  const filename=`${session.user.id}/${Date.now()}-${safe}`;
-  const encoded=encodeStoragePath(filename);
-
-  const r=await fetch(`${SUPABASE_URL}/storage/v1/object/pensadero/${encoded}`,{
-    method:'POST',
-    headers:{
-      'apikey':SUPABASE_KEY,
-      'Authorization':`Bearer ${session.access_token}`,
-      'Content-Type':file.type||'application/octet-stream',
-      'cache-control':'3600',
-      'x-upsert':'false'
-    },
-    body:file
-  });
-
-  if(!r.ok){
-    let message=`Error al subir la foto (${r.status})`;
-    try{
-      const j=await r.json();
-      message=j.message||j.error||message;
-    }catch(e){}
-    throw new Error(message);
+  const maxMB=5;
+  if(file.size > maxMB*1024*1024){
+    throw new Error(`La foto pesa más de ${maxMB} MB. Elige una imagen más pequeña.`);
   }
 
-  return {
-    url:`${SUPABASE_URL}/storage/v1/object/public/pensadero/${encoded}`,
-    path:filename
-  };
+  msg.textContent=`1/2 · Subiendo foto: ${file.name}…`;
+
+  const safe=(file.name||'imagen').replace(/[^a-zA-Z0-9._-]/g,'-');
+  const filename=`${user.id}/${crypto.randomUUID()}-${safe}`;
+
+  const {error}=await db.storage
+    .from('pensadero')
+    .upload(filename,file,{
+      cacheControl:'3600',
+      upsert:false,
+      contentType:file.type||undefined
+    });
+
+  if(error){
+    throw new Error(`FOTO · ${error.message}`);
+  }
+
+  const {data}=db.storage.from('pensadero').getPublicUrl(filename);
+  return {url:data.publicUrl,path:filename};
 }
 
 async function addEntry(){
   const input=document.getElementById('composerInput');
   const file=document.getElementById('composerImage').files[0];
   const text=input.value.trim();
-  if(!text)return;
-
   const msg=document.getElementById('editorMsg');
 
+  if(!text){
+    msg.className='admin-msg stage-error';
+    msg.textContent='Escribe primero un título o una idea.';
+    return;
+  }
+
+  const button=document.getElementById('composerAdd');
+  button.disabled=true;
+  msg.className='admin-msg';
+
   try{
-    msg.textContent='Guardando…';
-    document.getElementById('composerAdd').disabled=true;
+    msg.textContent='Comprobando sesión…';
+    const user=await verifiedUser();
 
-    const session=await requireSession();
-    const image=await uploadImage(file);
+    let image={url:'',path:''};
 
-    await restWrite('POST','entries',{
-      owner_id:session.user.id,
+    if(file){
+      image=await uploadImage(file,user,msg);
+      msg.textContent='2/2 · Foto subida ✓ · Guardando la entrada…';
+    }else{
+      msg.textContent='Sin foto · Guardando la entrada…';
+    }
+
+    const {error}=await db.from('entries').insert({
+      owner_id:user.id,
       text,
       type:activeType,
       done:false,
@@ -388,22 +352,36 @@ async function addEntry(){
       image_path:image.path
     });
 
+    if(error){
+      // Si ya se subió la foto y luego falla la BD, intentamos limpiar la foto.
+      if(image.path){
+        try{ await db.storage.from('pensadero').remove([image.path]); }catch(_){}
+      }
+      throw new Error(`DATOS · ${error.message}`);
+    }
+
     input.value='';
-    document.getElementById('composerImage').value='';
-    msg.textContent=`Guardado y publicado ✓ · ${session.user.email}`;
+    clearPhotoSelection();
+
+    msg.className='admin-msg stage-ok';
+    msg.textContent=`Guardado y publicado ✓ · ${user.email}`;
+
     await loadEntries();
 
   }catch(err){
     console.error(err);
-    msg.textContent='No se pudo guardar: '+(err.message||'error');
+    msg.className='admin-msg stage-error';
+    msg.textContent='No se pudo guardar · '+(err.message||'error desconocido');
   }finally{
-    document.getElementById('composerAdd').disabled=false;
+    button.disabled=false;
   }
 }
 
 async function toggleDone(e){
   try{
-    await restWrite('PATCH',`entries?id=eq.${encodeURIComponent(e.id)}`,{done:!e.done});
+    await verifiedUser();
+    const {error}=await db.from('entries').update({done:!e.done}).eq('id',e.id);
+    if(error) throw error;
     await loadEntries();
   }catch(err){
     alert('No se pudo guardar el cambio: '+err.message);
@@ -415,7 +393,9 @@ async function editEntry(e){
   if(nuevo===null||!nuevo.trim()||nuevo.trim()===e.text)return;
 
   try{
-    await restWrite('PATCH',`entries?id=eq.${encodeURIComponent(e.id)}`,{text:nuevo.trim()});
+    await verifiedUser();
+    const {error}=await db.from('entries').update({text:nuevo.trim()}).eq('id',e.id);
+    if(error) throw error;
     await loadEntries();
   }catch(err){
     alert('No se pudo editar: '+err.message);
@@ -426,27 +406,18 @@ async function deleteEntry(e){
   if(!confirm(`¿Borrar "${e.text}"?`))return;
 
   try{
-    await restWrite('DELETE',`entries?id=eq.${encodeURIComponent(e.id)}`);
+    await verifiedUser();
 
-    // Borrar la foto es secundario: si fallase, la entrada sí se elimina.
+    const {error}=await db.from('entries').delete().eq('id',e.id);
+    if(error) throw error;
+
     if(e.image_path){
-      try{
-        const session=await requireSession();
-        const temp=createClient(SUPABASE_URL,SUPABASE_KEY,{
-          auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false},
-          global:{headers:{Authorization:`Bearer ${session.access_token}`}}
-        });
-        await temp.auth.setSession({
-          access_token:session.access_token,
-          refresh_token:session.refresh_token
-        });
-        await temp.storage.from('pensadero').remove([e.image_path]);
-      }catch(storageErr){
-        console.warn('No se pudo borrar la foto de Storage:',storageErr);
-      }
+      const {error:storageError}=await db.storage.from('pensadero').remove([e.image_path]);
+      if(storageError) console.warn('La entrada se borró, pero no la foto:',storageError);
     }
 
     await loadEntries();
+
   }catch(err){
     alert('No se pudo borrar: '+err.message);
   }
@@ -457,26 +428,31 @@ async function login(){
   const password=document.getElementById('loginPassword').value;
   const msg=document.getElementById('loginMsg');
 
+  msg.className='admin-msg';
   msg.textContent='Entrando…';
 
   const {data,error}=await db.auth.signInWithPassword({email,password});
 
-  if(error){
-    msg.textContent='No se pudo iniciar sesión: '+error.message;
+  if(error || !data?.user || !data?.session){
+    msg.className='admin-msg stage-error';
+    msg.textContent='No se pudo iniciar sesión: '+(error?.message||'Supabase no devolvió una sesión.');
     return;
   }
 
-  if(!data?.session){
-    msg.textContent='Supabase no ha devuelto una sesión válida.';
+  // Verificación real contra Supabase Auth
+  const {data:verified,error:verifyError}=await db.auth.getUser();
+  if(verifyError || !verified?.user){
+    msg.className='admin-msg stage-error';
+    msg.textContent='Se inició sesión, pero no se pudo verificar el usuario.';
     return;
   }
 
-  // Guardamos la sesión EN MEMORIA. No dependemos de localStorage/getSession.
-  currentSession=data.session;
-  currentUser=data.session.user;
-
+  currentUser=verified.user;
   showEditor();
-  document.getElementById('editorMsg').textContent=`Sesión activa ✓ · ${currentUser.email}`;
+
+  const editorMsg=document.getElementById('editorMsg');
+  editorMsg.className='admin-msg stage-ok';
+  editorMsg.innerHTML=`Sesión verificada ✓ · ${escapeHtml(currentUser.email)} <span class="editor-version">editor v4</span>`;
 }
 
 async function logout(){
@@ -488,12 +464,56 @@ async function logout(){
   document.getElementById('loginBox').style.display='';
   document.getElementById('loginPassword').value='';
   document.getElementById('loginMsg').textContent='';
+  clearPhotoSelection();
 }
 
 function showEditor(){
   document.body.classList.add('editor');
   document.getElementById('loginBox').style.display='none';
   document.getElementById('editorBox').style.display='';
+}
+
+function escapeHtml(value){
+  return String(value??'')
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+
+function clearPhotoSelection(){
+  const input=document.getElementById('composerImage');
+  if(input) input.value='';
+  const feedback=document.getElementById('photoFeedback');
+  if(feedback) feedback.classList.remove('show');
+  const preview=document.getElementById('photoPreview');
+  if(preview?.src?.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+  if(preview) preview.removeAttribute('src');
+  const label=document.getElementById('photoLabel');
+  if(label) label.textContent='Añadir foto';
+}
+
+function onPhotoSelected(){
+  const input=document.getElementById('composerImage');
+  const file=input.files?.[0];
+  const feedback=document.getElementById('photoFeedback');
+  const preview=document.getElementById('photoPreview');
+  const name=document.getElementById('photoName');
+  const size=document.getElementById('photoSize');
+  const label=document.getElementById('photoLabel');
+
+  if(!file){
+    clearPhotoSelection();
+    return;
+  }
+
+  if(preview.src?.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+  preview.src=URL.createObjectURL(file);
+  name.textContent=file.name;
+  size.textContent=`Seleccionada · ${(file.size/1024/1024).toFixed(2)} MB · se subirá al pulsar Guardar`;
+  label.textContent='Cambiar foto';
+  feedback.classList.add('show');
 }
 
 function wire(){
@@ -510,6 +530,7 @@ function wire(){
   document.getElementById('loginBtn').addEventListener('click',login);
   document.getElementById('loginPassword').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
   document.getElementById('logoutBtn').addEventListener('click',logout);
+  document.getElementById('composerImage').addEventListener('change',onPhotoSelected);
 }
 
 async function init(){
@@ -521,9 +542,17 @@ async function init(){
     if(!configured){
       document.getElementById('loginMsg').textContent='Primero pega tu Project URL y Publishable key en index.html.';
     }else{
-      currentSession=null;
-      currentUser=null;
-      document.getElementById('loginMsg').textContent='Inicia sesión para editar Pensadero.';
+      const {data,error}=await db.auth.getUser();
+      if(!error && data?.user){
+        currentUser=data.user;
+        showEditor();
+        const editorMsg=document.getElementById('editorMsg');
+        editorMsg.className='admin-msg stage-ok';
+        editorMsg.innerHTML=`Sesión verificada ✓ · ${escapeHtml(currentUser.email)} <span class="editor-version">editor v4</span>`;
+      }else{
+        currentUser=null;
+        document.getElementById('loginMsg').textContent='Inicia sesión para editar Pensadero.';
+      }
     }
   }
   await loadEntries();
