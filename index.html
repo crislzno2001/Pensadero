@@ -254,8 +254,51 @@ function render(){
   });
 }
 
+async function requireSession(){
+  const {data,error}=await db.auth.getSession();
+  if(error) throw error;
+  let session=data?.session||null;
+
+  if(!session){
+    throw new Error('Tu sesión no está activa. Pulsa Salir y vuelve a iniciar sesión.');
+  }
+
+  // Fuerza que el cliente use explícitamente esta sesión antes de escribir.
+  const {data:setData,error:setError}=await db.auth.setSession({
+    access_token:session.access_token,
+    refresh_token:session.refresh_token
+  });
+  if(setError) throw setError;
+  session=setData?.session||session;
+  currentUser=session.user;
+  return session;
+}
+
+async function restWrite(method, path, body){
+  const session=await requireSession();
+  const r=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{
+    method,
+    headers:{
+      'apikey':SUPABASE_KEY,
+      'Authorization':`Bearer ${session.access_token}`,
+      'Content-Type':'application/json',
+      'Prefer':'return=minimal'
+    },
+    body:body===undefined?undefined:JSON.stringify(body)
+  });
+  if(!r.ok){
+    let message=`HTTP ${r.status}`;
+    try{
+      const j=await r.json();
+      message=j.message||j.error_description||j.error||message;
+    }catch(e){}
+    throw new Error(message);
+  }
+}
+
 async function uploadImage(file){
   if(!file) return {url:'',path:''};
+  await requireSession();
   const safe=(file.name||'imagen').replace(/[^a-zA-Z0-9._-]/g,'-');
   const filename=`${currentUser.id}/${Date.now()}-${safe}`;
   const {error}=await db.storage.from('pensadero').upload(filename,file,{cacheControl:'3600',upsert:false});
@@ -272,21 +315,24 @@ async function addEntry(){
 
   const msg=document.getElementById('editorMsg');
   try{
-    msg.textContent='Guardando…';
+    msg.textContent='Comprobando sesión…';
     document.getElementById('composerAdd').disabled=true;
+    const session=await requireSession();
+    msg.textContent=`Sesión activa: ${session.user.email} · Guardando…`;
+
     const image=await uploadImage(file);
-    const {error}=await db.from('entries').insert({
-      owner_id:currentUser.id,
+    await restWrite('POST','entries',{
+      owner_id:session.user.id,
       text,
       type:activeType,
       done:false,
       image_url:image.url,
       image_path:image.path
     });
-    if(error)throw error;
+
     input.value='';
     document.getElementById('composerImage').value='';
-    msg.textContent='Guardado y publicado ✓';
+    msg.textContent=`Guardado y publicado ✓ · ${session.user.email}`;
     await loadEntries();
   }catch(err){
     console.error(err);
@@ -297,27 +343,32 @@ async function addEntry(){
 }
 
 async function toggleDone(e){
-  const {error}=await db.from('entries').update({done:!e.done}).eq('id',e.id);
-  if(error)return alert('No se pudo guardar el cambio.');
-  await loadEntries();
+  try{
+    await restWrite('PATCH',`entries?id=eq.${encodeURIComponent(e.id)}`,{done:!e.done});
+    await loadEntries();
+  }catch(err){ alert('No se pudo guardar el cambio: '+err.message); }
 }
 
 async function editEntry(e){
   const nuevo=prompt('Editar:',e.text);
   if(nuevo===null||!nuevo.trim()||nuevo.trim()===e.text)return;
-  const {error}=await db.from('entries').update({text:nuevo.trim()}).eq('id',e.id);
-  if(error)return alert('No se pudo editar.');
-  await loadEntries();
+  try{
+    await restWrite('PATCH',`entries?id=eq.${encodeURIComponent(e.id)}`,{text:nuevo.trim()});
+    await loadEntries();
+  }catch(err){ alert('No se pudo editar: '+err.message); }
 }
 
 async function deleteEntry(e){
   if(!confirm(`¿Borrar "${e.text}"?`))return;
-  const {error}=await db.from('entries').delete().eq('id',e.id);
-  if(error)return alert('No se pudo borrar.');
-  if(e.image_path){
-    await db.storage.from('pensadero').remove([e.image_path]);
-  }
-  await loadEntries();
+  try{
+    await restWrite('DELETE',`entries?id=eq.${encodeURIComponent(e.id)}`);
+    if(e.image_path){
+      await requireSession();
+      const {error}=await db.storage.from('pensadero').remove([e.image_path]);
+      if(error) console.warn(error);
+    }
+    await loadEntries();
+  }catch(err){ alert('No se pudo borrar: '+err.message); }
 }
 
 async function login(){
@@ -325,10 +376,32 @@ async function login(){
   const password=document.getElementById('loginPassword').value;
   const msg=document.getElementById('loginMsg');
   msg.textContent='Entrando…';
+
   const {data,error}=await db.auth.signInWithPassword({email,password});
-  if(error){msg.textContent='Email o contraseña incorrectos.';return;}
-  currentUser=data.user;
+  if(error){
+    msg.textContent='No se pudo iniciar sesión: '+error.message;
+    return;
+  }
+
+  if(!data?.session){
+    currentUser=null;
+    msg.textContent='El usuario existe, pero Supabase no ha creado una sesión. Revisa que el email esté confirmado.';
+    return;
+  }
+
+  // Dejamos la sesión fijada de forma explícita en el cliente.
+  const {error:setError}=await db.auth.setSession({
+    access_token:data.session.access_token,
+    refresh_token:data.session.refresh_token
+  });
+  if(setError){
+    msg.textContent='La sesión se creó, pero no se pudo activar: '+setError.message;
+    return;
+  }
+
+  currentUser=data.session.user;
   showEditor();
+  document.getElementById('editorMsg').textContent=`Sesión activa ✓ · ${currentUser.email}`;
 }
 
 async function logout(){
@@ -370,9 +443,14 @@ async function init(){
     if(!configured){
       document.getElementById('loginMsg').textContent='Primero pega tu Project URL y Publishable key en index.html.';
     }else{
-      const {data}=await db.auth.getUser();
-      currentUser=data?.user||null;
-      if(currentUser)showEditor();
+      const {data,error}=await db.auth.getSession();
+      if(!error && data?.session){
+        currentUser=data.session.user;
+        showEditor();
+        document.getElementById('editorMsg').textContent=`Sesión activa ✓ · ${currentUser.email}`;
+      }else{
+        currentUser=null;
+      }
     }
   }
   await loadEntries();
