@@ -268,7 +268,7 @@ footer em{font-family:var(--serif);font-size:.9rem;color:#cbc8c0}
 
     <div class="editor" id="editorBox">
       <div class="admin-title">Escribir artículo</div>
-      <div class="admin-status ok" id="sessionStatus"></div><div class="admin-status" style="font-size:.62rem">Editor v5 · sesión estable</div>
+      <div class="admin-status ok" id="sessionStatus"></div><div class="admin-status" style="font-size:.62rem">Editor v6 · JWT explícito</div>
 
       <div class="editor-grid">
         <div>
@@ -391,10 +391,131 @@ function setQuery(params={}){
 }
 window.addEventListener('popstate',route);
 
+
+function requireSession(){
+  if(!session?.access_token || !user){
+    throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
+  }
+  return session;
+}
+
+async function apiRequest(path,{method='GET',body=null,prefer=''}={}){
+  const s=requireSession();
+
+  const headers={
+    'apikey':SUPABASE_KEY,
+    'Authorization':`Bearer ${s.access_token}`
+  };
+
+  if(body!==null){
+    headers['Content-Type']='application/json';
+  }
+  if(prefer){
+    headers['Prefer']=prefer;
+  }
+
+  const response=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{
+    method,
+    headers,
+    body:body===null?undefined:JSON.stringify(body)
+  });
+
+  if(!response.ok){
+    let message=`HTTP ${response.status}`;
+    try{
+      const payload=await response.json();
+      message=payload.message||payload.error_description||payload.error||message;
+    }catch(_){}
+    throw new Error(message);
+  }
+
+  if(response.status===204)return null;
+  const text=await response.text();
+  return text?JSON.parse(text):null;
+}
+
+async function publicApiRequest(path){
+  const response=await fetch(`${SUPABASE_URL}/rest/v1/${path}`,{
+    headers:{'apikey':SUPABASE_KEY}
+  });
+
+  if(!response.ok){
+    let message=`HTTP ${response.status}`;
+    try{
+      const payload=await response.json();
+      message=payload.message||payload.error||message;
+    }catch(_){}
+    throw new Error(message);
+  }
+
+  return await response.json();
+}
+
+function encodeStoragePath(path){
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+async function storageUpload(file,path){
+  const s=requireSession();
+  const encoded=encodeStoragePath(path);
+
+  const response=await fetch(`${SUPABASE_URL}/storage/v1/object/pensadero/${encoded}`,{
+    method:'POST',
+    headers:{
+      'apikey':SUPABASE_KEY,
+      'Authorization':`Bearer ${s.access_token}`,
+      'Content-Type':file.type||'application/octet-stream',
+      'cache-control':'3600',
+      'x-upsert':'false'
+    },
+    body:file
+  });
+
+  if(!response.ok){
+    let message=`HTTP ${response.status}`;
+    try{
+      const payload=await response.json();
+      message=payload.message||payload.error||message;
+    }catch(_){}
+    throw new Error(message);
+  }
+
+  return `${SUPABASE_URL}/storage/v1/object/public/pensadero/${encoded}`;
+}
+
+async function storageDelete(path){
+  const s=requireSession();
+  const encoded=encodeStoragePath(path);
+
+  const response=await fetch(`${SUPABASE_URL}/storage/v1/object/pensadero/${encoded}`,{
+    method:'DELETE',
+    headers:{
+      'apikey':SUPABASE_KEY,
+      'Authorization':`Bearer ${s.access_token}`
+    }
+  });
+
+  if(!response.ok && response.status!==404){
+    let message=`HTTP ${response.status}`;
+    try{
+      const payload=await response.json();
+      message=payload.message||payload.error||message;
+    }catch(_){}
+    throw new Error(message);
+  }
+}
+
 async function fetchEntries(){
-  const {data,error}=await db.from('entries').select('*').order('created_at',{ascending:false});
-  if(error){console.error(error);entries=[];return}
-  entries=data||[];
+  try{
+    if(session?.access_token && user){
+      entries=await apiRequest('entries?select=*&order=created_at.desc')||[];
+    }else{
+      entries=await publicApiRequest('entries?select=*&published=eq.true&order=created_at.desc')||[];
+    }
+  }catch(error){
+    console.error(error);
+    entries=[];
+  }
 }
 
 function publicEntries(){
@@ -594,28 +715,15 @@ $('#inlineInput').addEventListener('change',e=>{
 
 async function uploadFile(file,folder='articles'){
   if(!file)return null;
-
-  if(!user || !session){
-    throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
-  }
+  requireSession();
 
   if(file.size>5*1024*1024)throw new Error('La imagen supera 5 MB.');
 
   const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'-');
   const path=`${user.id}/${folder}/${crypto.randomUUID()}-${safe}`;
+  const url=await storageUpload(file,path);
 
-  const {error}=await db.storage
-    .from('pensadero')
-    .upload(path,file,{
-      contentType:file.type,
-      upsert:false,
-      cacheControl:'3600'
-    });
-
-  if(error)throw new Error('FOTO · '+error.message);
-
-  const {data}=db.storage.from('pensadero').getPublicUrl(path);
-  return {url:data.publicUrl,path};
+  return {url,path};
 }
 
 $('#insertImageBtn').addEventListener('click',async()=>{
@@ -656,15 +764,21 @@ async function saveArticle(published){
       const up=await uploadFile(coverFile,'covers');imageUrl=up.url;imagePath=up.path;
     }
     const payload={text:title,subtitle,body,type,published,image_url:imageUrl||'',image_path:imagePath||'',updated_at:new Date().toISOString()};
-    let error;
+    requireSession();
+
     if(editingId){
-      if(!user || !session)throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
-      ({error}=await db.from('entries').update(payload).eq('id',editingId));
+      await apiRequest(`entries?id=eq.${encodeURIComponent(editingId)}`,{
+        method:'PATCH',
+        body:payload,
+        prefer:'return=minimal'
+      });
     }else{
-      if(!user || !session)throw new Error('Tu sesión no está activa. Sal y vuelve a entrar.');
-      ({error}=await db.from('entries').insert({...payload,owner_id:user.id,done:false}));
+      await apiRequest('entries',{
+        method:'POST',
+        body:{...payload,owner_id:user.id,done:false},
+        prefer:'return=minimal'
+      });
     }
-    if(error)throw new Error('DATOS · '+error.message);
     status.className='admin-status ok';status.textContent=published?'Publicado ✓':'Borrador guardado ✓';
     await fetchEntries();renderAdminList();clearEditor();route();
   }catch(err){status.className='admin-status err';status.textContent='No se pudo guardar · '+err.message}
@@ -683,11 +797,28 @@ function editArticle(id){
 }
 
 async function deleteArticle(id){
-  const e=entries.find(x=>String(x.id)===String(id));if(!e||!confirm(`¿Borrar "${e.text}"?`))return;
-  const {error}=await db.from('entries').delete().eq('id',id);
-  if(error){alert(error.message);return}
-  if(e.image_path)await db.storage.from('pensadero').remove([e.image_path]);
-  await fetchEntries();renderAdminList();route();
+  const e=entries.find(x=>String(x.id)===String(id));
+  if(!e||!confirm(`¿Borrar "${e.text}"?`))return;
+
+  try{
+    requireSession();
+
+    await apiRequest(`entries?id=eq.${encodeURIComponent(id)}`,{
+      method:'DELETE',
+      prefer:'return=minimal'
+    });
+
+    if(e.image_path){
+      try{await storageDelete(e.image_path)}catch(storageError){console.warn(storageError)}
+    }
+
+    await fetchEntries();
+    renderAdminList();
+    route();
+
+  }catch(error){
+    alert('No se pudo borrar: '+error.message);
+  }
 }
 
 function renderAdminList(){
