@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pensadero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800;900&family=Fraunces:ital,opsz,wght@1,9..144,400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#ffffff;
+    --ink:#0c0c0c;
+    --muted:#7a766e;
+    --faint:#b7b2a8;
+    --line:#e4e2dc;
+    --rule:#0c0c0c;
+    --accent:#e5342a;
+    --sans:"Archivo",-apple-system,system-ui,sans-serif;
+    --serif:"Fraunces",Georgia,serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);line-height:1.4;-webkit-font-smoothing:antialiased}
+  ::selection{background:var(--accent);color:#fff}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 32px}
+
+  /* ---------- MASTHEAD ---------- */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:20px;
+    padding:24px 0 20px;border-bottom:1px solid var(--rule)}
+  .brand{font-weight:800;font-size:.8rem;letter-spacing:.14em;text-transform:uppercase}
+  .brand .dot{color:var(--accent)}
+  .date{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:right;
+    display:flex;align-items:center;gap:10px}
+  .mode-badge{font-size:.6rem;font-weight:800;letter-spacing:.1em;padding:4px 9px;border-radius:999px;
+    border:1px solid var(--accent);color:var(--accent);text-transform:uppercase}
+
+  .hero{padding:36px 0 22px;border-bottom:1px solid var(--rule)}
+  .wordmark{font-weight:900;font-size:clamp(3rem,14.5vw,11.5rem);line-height:.82;
+    letter-spacing:-.045em;text-transform:uppercase}
+  .tagline{margin-top:16px;font-family:var(--serif);font-style:italic;
+    font-size:clamp(1rem,2.2vw,1.28rem);color:var(--muted);max-width:40ch}
+
+  /* ---------- COMPOSER ---------- */
+  .composer{padding:20px 0;border-bottom:1px solid var(--rule);
+    display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap}
+  .composer .label{font-size:.7rem;font-weight:800;letter-spacing:.18em;text-transform:uppercase;flex:none;
+    padding-bottom:11px}
+  .types{display:flex;gap:7px;flex-wrap:wrap;padding-bottom:2px}
+  .type{font-size:.64rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;cursor:pointer;
+    padding:6px 12px;border:1px solid var(--faint);border-radius:999px;background:transparent;color:var(--muted);
+    transition:.16s}
+  .type:hover{border-color:var(--ink);color:var(--ink)}
+  .type.active{background:var(--ink);border-color:var(--ink);color:#fff}
+  .composer-fields{display:flex;gap:16px;flex-wrap:wrap;flex:1;min-width:280px}
+  .field{flex:2;min-width:200px;display:flex;align-items:center;gap:10px}
+  .field-img{flex:1;min-width:180px;display:flex;align-items:center;gap:10px}
+  .field input{flex:1;font-family:var(--sans);font-size:1rem;color:var(--ink);background:transparent;
+    border:none;border-bottom:1.5px solid var(--line);padding:9px 2px;transition:border-color .2s}
+  .field-img input{flex:1;font-family:var(--sans);font-size:.82rem;color:var(--ink);background:transparent;
+    border:none;border-bottom:1.5px solid var(--line);padding:9px 2px;transition:border-color .2s}
+  .field input::placeholder,.field-img input::placeholder{color:var(--faint)}
+  .field input:focus,.field-img input:focus{outline:none;border-color:var(--accent)}
+  .field button{font-size:1.25rem;line-height:1;width:38px;height:38px;border:1.5px solid var(--ink);
+    border-radius:50%;background:transparent;cursor:pointer;flex:none;transition:.16s}
+  .field button:hover,.field button:focus-visible{background:var(--ink);color:#fff;outline:none}
+
+  .exportbar{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+  .exportbar .btn{font-size:.66rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+    padding:9px 16px;border-radius:999px;border:1.5px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer}
+  .exportbar .btn:hover{background:var(--accent);border-color:var(--accent)}
+  .exportbar .hint{font-size:.72rem;color:var(--muted);font-family:var(--serif);font-style:italic}
+  .exportbox{width:100%;margin-top:10px;font-family:monospace;font-size:.72rem;padding:12px;
+    border:1px solid var(--line);background:#fff;max-height:160px;overflow:auto;white-space:pre-wrap;display:none}
+  .exportbox.show{display:block}
+
+  /* ---------- CATEGORIES ---------- */
+  .catbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding:18px 0;border-bottom:1px solid var(--rule)}
+  .catbar .label{font-size:.7rem;font-weight:800;letter-spacing:.18em;text-transform:uppercase}
+  .pills{display:flex;gap:8px;flex-wrap:wrap}
+  .pill{font-size:.66rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;cursor:pointer;
+    padding:7px 14px;border:1px solid var(--ink);border-radius:999px;background:transparent;color:var(--ink);transition:.16s}
+  .pill:hover,.pill:focus-visible{background:var(--ink);color:#fff;outline:none}
+  .pill.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .pill .n{opacity:.6;margin-left:5px}
+
+  /* ---------- GRID ---------- */
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
+    border-left:1px solid var(--line);border-right:1px solid var(--line);border-bottom:1px solid var(--rule)}
+  .card{background:var(--paper);padding:24px 24px 20px;display:flex;flex-direction:column;
+    min-height:210px;animation:rise .4s cubic-bezier(.2,.7,.2,1) both}
+  .c-cover{margin:-24px -24px 18px;aspect-ratio:16/10;overflow:hidden;background:var(--line);position:relative}
+  .c-cover img{width:100%;height:100%;object-fit:cover;display:block;
+    filter:grayscale(1) contrast(1.08) brightness(.98);transition:filter .3s ease}
+  .card:hover .c-cover img{filter:grayscale(.2) contrast(1.05)}
+  .c-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:20px}
+  .c-date{font-size:.68rem;letter-spacing:.06em;color:var(--muted);text-transform:uppercase}
+  .tag{font-size:.58rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+    padding:5px 10px;border:1px solid var(--ink);border-radius:999px;flex:none}
+  .c-title{font-weight:700;font-size:1.34rem;line-height:1.12;letter-spacing:-.01em;
+    word-break:break-word;flex:1}
+  .card.done .c-title{color:var(--faint);text-decoration:line-through;text-decoration-color:var(--faint)}
+  .card.done .tag{color:var(--faint);border-color:var(--line)}
+  .card.done .c-cover img{filter:grayscale(1) opacity(.5)}
+  .c-foot{display:flex;align-items:center;gap:12px;margin-top:20px;padding-top:14px;
+    border-top:1px solid var(--line)}
+  .check{width:18px;height:18px;border:1.5px solid var(--faint);border-radius:50%;background:transparent;
+    cursor:pointer;flex:none;position:relative;transition:.16s}
+  .check:hover{border-color:var(--ink)}
+  .check.on{background:var(--accent);border-color:var(--accent)}
+  .check.on::after{content:"";position:absolute;left:5px;top:2px;width:4px;height:8px;
+    border:solid #fff;border-width:0 2px 2px 0;transform:rotate(43deg)}
+  .state{font-size:.64rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  .card.done .state{color:var(--faint)}
+  .del{margin-left:auto;font-size:1.1rem;line-height:1;color:var(--faint);background:none;border:none;
+    cursor:pointer;opacity:0;transition:.16s}
+  .card:hover .del{opacity:1}
+  .del:hover,.del:focus-visible{color:var(--accent);outline:none}
+
+  .empty{grid-column:1/-1;background:var(--paper);padding:60px 24px;text-align:center;
+    font-family:var(--serif);font-style:italic;color:var(--faint);font-size:1.15rem}
+
+  /* ---------- FOOTER ---------- */
+  footer{background:var(--ink);color:#fff;margin-top:0}
+  .foot{max-width:1180px;margin:0 auto;padding:22px 32px;display:flex;justify-content:space-between;
+    align-items:center;gap:14px;flex-wrap:wrap;font-size:.72rem;letter-spacing:.12em;text-transform:uppercase}
+  .foot .saved{display:inline-flex;align-items:center;gap:8px;color:#c9c6bf}
+  .foot .dot-s{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+
+  [data-editor-only]{display:none}
+  body.is-editor [data-editor-only]{display:flex}
+  body.is-editor .grid [data-editor-only]{display:inline-flex}
+
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @media(max-width:860px){.grid{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:560px){.wrap{padding:0 20px}.grid{grid-template-columns:1fr}.foot{padding:20px}}
+  @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="topbar">
+    <div class="brand">Cristina<span class="dot">.</span> pensadero</div>
+    <div class="date"><span id="today">—</span><span class="mode-badge" data-editor-only style="display:none">Modo edición</span></div>
+  </header>
+
+  <section class="hero">
+    <h1 class="wordmark">Pensadero</h1>
+    <p class="tagline">Un archivo de curiosidad. Lo que quiero leer, ver y no olvidar.</p>
+  </section>
+
+  <!-- Solo visible para ti, con ?editar=TUCLAVE en la URL -->
+  <section class="composer" data-editor-only style="display:none">
+    <span class="label">Añadir</span>
+    <div class="types" id="types">
+      <button class="type active" data-type="pensamiento">Pensamiento</button>
+      <button class="type" data-type="lectura">Lectura</button>
+      <button class="type" data-type="investigacion">Investigación</button>
+      <button class="type" data-type="pelicula">Película</button>
+    </div>
+    <div class="composer-fields">
+      <div class="field">
+        <input type="text" id="composerInput" placeholder="Escribe y pulsa Enter…" aria-label="Nueva entrada">
+      </div>
+      <div class="field-img">
+        <input type="text" id="composerImage" placeholder="URL de foto de portada (opcional)" aria-label="Foto de portada">
+      </div>
+      <button id="composerAdd" aria-label="Añadir">+</button>
+    </div>
+  </section>
+
+  <section class="exportbar" data-editor-only style="display:none">
+    <button class="btn" id="exportBtn">Exportar cambios</button>
+    <span class="hint">Copia esto y pégalo en el código antes de volver a publicar la web</span>
+    <textarea class="exportbox" id="exportBox" readonly></textarea>
+  </section>
+
+  <!-- CATEGORIES -->
+  <section class="catbar">
+    <span class="label">Categorías</span>
+    <div class="pills" id="filters">
+      <button class="pill active" data-filter="todo">Todo</button>
+      <button class="pill" data-filter="pensamiento">Pensamientos</button>
+      <button class="pill" data-filter="lectura">Lecturas</button>
+      <button class="pill" data-filter="investigacion">Investigaciones</button>
+      <button class="pill" data-filter="pelicula">Películas</button>
+    </div>
+  </section>
+
+  <!-- GRID -->
+  <main class="grid" id="grid"></main>
+</div>
+
+<footer>
+  <div class="foot">
+    <span class="saved"><span class="dot-s"></span><span id="saveState">Contenido público · solo lectura</span></span>
+    <span>Pensadero · Cristina</span>
+  </div>
+</footer>
+
+<script>
+  /* ============================================================
+     CONTENIDO PÚBLICO
+     Esto es lo que ve CUALQUIERA que entre a la web.
+     Cada entrada admite: id, text, type, done, ts, image (URL opcional).
+     Cuando exportes cambios en modo edición, sustituye este
+     array entero por el que te dé el botón "Exportar cambios".
+     ============================================================ */
+  const ENTRIES_SEED = [];
+
+  /* ============================================================
+     CLAVE SECRETA DE EDICIÓN
+     Cámbiala por algo que solo tú sepas antes de publicar.
+     Para editar entrarás a: tu-web.com/?editar=TUCLAVE
+     ============================================================ */
+  const EDIT_KEY = 'pensandopensamientos';
+
+  const DRAFT_KEY='pensadero-draft';
+  const TYPES={pensamiento:'Pensamiento',lectura:'Lectura',investigacion:'Investigación',pelicula:'Película'};
+  const isEditor = new URLSearchParams(location.search).get('editar') === EDIT_KEY;
+
+  let entries = ENTRIES_SEED.map(e=>({...e}));
+  let activeType='pensamiento';
+  let activeFilter='todo';
+
+  const MES=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const MESL=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const DIAS=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+
+  function setToday(){
+    const d=new Date(),h=d.getHours();
+    const s=h<6?'Buenas noches':h<13?'Buenos días':h<21?'Buenas tardes':'Buenas noches';
+    document.getElementById('today').textContent=`${s} · ${DIAS[d.getDay()]} ${d.getDate()} ${MESL[d.getMonth()]}`;
+  }
+  const cardDate=ts=>{const d=new Date(ts);return `${d.getDate()}. ${MES[d.getMonth()]} ${d.getFullYear()}`;};
+
+  // NOTA: dentro de Claude se usa window.storage como borrador de edición.
+  // Si publicas fuera (GitHub Pages...), cambia estas dos funciones por
+  // localStorage.getItem/setItem — funciona igual y es gratis.
+  async function loadDraft(){
+    try{
+      const r=await window.storage.get(DRAFT_KEY);
+      if(r&&r.value){ entries=JSON.parse(r.value); }
+    }catch(e){}
+  }
+  async function saveDraft(){
+    try{ await window.storage.set(DRAFT_KEY,JSON.stringify(entries)); }
+    catch(e){}
+  }
+
+  function counts(){
+    const c={todo:entries.length,pensamiento:0,lectura:0,investigacion:0,pelicula:0};
+    entries.forEach(e=>c[e.type]++);
+    document.querySelectorAll('#filters .pill').forEach(p=>{
+      const f=p.dataset.filter, n=c[f];
+      let tag=p.querySelector('.n'); if(!tag){tag=document.createElement('span');tag.className='n';p.appendChild(tag);}
+      tag.textContent=n?n:'';
+    });
+  }
+
+  function render(){
+    const grid=document.getElementById('grid');
+    grid.innerHTML='';
+    counts();
+    const list=entries
+      .filter(e=>activeFilter==='todo'||e.type===activeFilter)
+      .sort((a,b)=>b.ts-a.ts);
+
+    if(list.length===0){
+      const d=document.createElement('div'); d.className='empty';
+      d.textContent=activeFilter==='todo'
+        ? 'Todavía no has pensado nada aquí. Empieza por lo primero que te venga.'
+        : 'Nada en esta categoría. Añade lo primero que se te ocurra.';
+      grid.appendChild(d); return;
+    }
+
+    list.forEach(e=>{
+      const card=document.createElement('article');
+      card.className='card'+(e.done?' done':'');
+
+      if(e.image){
+        const cover=document.createElement('div'); cover.className='c-cover';
+        const img=document.createElement('img'); img.src=e.image; img.alt='';
+        img.addEventListener('error',()=>{cover.remove();});
+        cover.appendChild(img);
+        card.appendChild(cover);
+      }
+
+      const top=document.createElement('div'); top.className='c-top';
+      const dt=document.createElement('span'); dt.className='c-date'; dt.textContent=cardDate(e.ts);
+      const tg=document.createElement('span'); tg.className='tag'; tg.textContent=TYPES[e.type];
+      top.append(dt,tg);
+
+      const title=document.createElement('div'); title.className='c-title'; title.textContent=e.text;
+
+      const foot=document.createElement('div'); foot.className='c-foot';
+      const chk=document.createElement('button'); chk.className='check'+(e.done?' on':''); chk.setAttribute('data-editor-only','');
+      chk.setAttribute('aria-label',e.done?'Marcar como pendiente':'Marcar como hecho');
+      chk.addEventListener('click',()=>{e.done=!e.done;saveDraft();render();});
+      const st=document.createElement('span'); st.className='state'; st.textContent=e.done?'Hecho':'Pendiente';
+      const del=document.createElement('button'); del.className='del'; del.setAttribute('data-editor-only',''); del.setAttribute('aria-label','Borrar'); del.textContent='×';
+      del.addEventListener('click',()=>{entries=entries.filter(x=>x.id!==e.id);saveDraft();render();});
+      foot.append(chk,st,del);
+
+      card.append(top,title,foot);
+      grid.appendChild(card);
+    });
+  }
+
+  function add(){
+    const input=document.getElementById('composerInput');
+    const imgInput=document.getElementById('composerImage');
+    const t=input.value.trim(); if(!t)return;
+    const img=imgInput.value.trim();
+    entries.push({id:uid(),text:t,type:activeType,done:false,ts:Date.now(),image:img});
+    input.value=''; imgInput.value=''; saveDraft(); render(); input.focus();
+  }
+
+  function doExport(){
+    const lines = entries.map(e=>
+      `  {id:${JSON.stringify(e.id)},text:${JSON.stringify(e.text)},type:${JSON.stringify(e.type)},done:${e.done},ts:${e.ts},image:${JSON.stringify(e.image||'')}}`
+    );
+    const code = `const ENTRIES_SEED = [\n${lines.join(',\n')}\n];`;
+    const box=document.getElementById('exportBox');
+    box.value=code; box.classList.add('show'); box.select();
+    try{ document.execCommand('copy'); document.getElementById('exportBtn').textContent='¡Copiado!'; }
+    catch(e){ document.getElementById('exportBtn').textContent='Selecciona y copia'; }
+    setTimeout(()=>{document.getElementById('exportBtn').textContent='Exportar cambios';},2000);
+  }
+
+  function wire(){
+    if(!isEditor) return;
+    document.getElementById('composerAdd').addEventListener('click',add);
+    document.getElementById('composerInput').addEventListener('keydown',e=>{if(e.key==='Enter')add();});
+    document.getElementById('composerImage').addEventListener('keydown',e=>{if(e.key==='Enter')add();});
+    document.getElementById('exportBtn').addEventListener('click',doExport);
+    document.querySelectorAll('#types .type').forEach(b=>b.addEventListener('click',()=>{
+      document.querySelectorAll('#types .type').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); activeType=b.dataset.type;
+      document.getElementById('composerInput').focus();
+    }));
+  }
+
+  function wireFilters(){
+    document.querySelectorAll('#filters .pill').forEach(b=>b.addEventListener('click',()=>{
+      document.querySelectorAll('#filters .pill').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); activeFilter=b.dataset.filter; render();
+    }));
+  }
+
+  (async function(){
+    setToday();
+    if(isEditor){
+      document.body.classList.add('is-editor');
+      document.querySelectorAll('[data-editor-only]').forEach(el=>{ if(getComputedStyle(el).display==='none') el.style.display=''; });
+      document.getElementById('saveState').textContent='Modo edición · borrador local';
+      await loadDraft();
+      wire();
+    }
+    wireFilters();
+    render();
+  })();
+</script>
+</body>
+</html>
